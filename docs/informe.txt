@@ -1,0 +1,179 @@
+INFORME TÉCNICO — PROYECTO SCCN
+Sistema de Centralización y Coordinación ante Catástrofes Naturales
+
+
+Autores: Ayleen González - Bastian Venegas
+Asignatura: Ingeniería de Software
+Docente: Felipe Hormazábal Cortez
+Fecha: 27 de septiembre de 2026
+Repositorio:    repositorio sccn 
+1. RESUMEN EJECUTIVO
+SCCN es un prototipo funcional de software orientado a la coordinación operativa entre un Puesto de Mando Central (comandante de Incidentes) y las brigadas desplegadas en terreno (Brigadistas) durante catástrofes naturales (incendios, inundaciones, sismos, aluviones).
+El sistema resuelve tres problemas críticos identificados en la operación real:
+1.	Falta de visibilidad unificada: el mando no sabe en tiempo real dónde están sus brigadas, qué zonas son de riesgo y qué recursos hay disponibles.
+2.	Pérdida de reportes por falta de señal: en catástrofes la infraestructura de red colapsa y los brigadistas no pueden reportar estado, misiones ni emergencias.
+3.	Ausencia de canal de emergencia inmediato: no existe forma simple y confiable de que un brigadista en peligro alerte al mando con su ubicación.
+
+La solución propuesta incorpora un diseño offline-first, un botón S.O.S. con confirmación explícita, un mapa operativo geoespacial y un switcher de roles con autenticación JWT simulada. El prototipo es un único archivo HTML autocontenido, con las buenas prácticas de OWASP aplicadas desde el primer paso y con una matriz de testing documentada.
+2. DESCRIPCIÓN DEL PROBLEMA Y SOLUCIÓN PROPUESTA
+2.1 Contexto del negocio/pyme
+Durante una catástrofe natural, la coordinación entre el puesto de mando y las brigadas en terreno depende hoy de radios, WhatsApp y planillas manuales. Esto genera:
+•	Duplicación de reportes y pérdida de trazabilidad.
+•	Retraso en la asignación de recursos.
+•	Riesgo humano cuando un brigadista queda aislado sin canal de auxilio.
+•	Imposibilidad de auditar decisiones post-evento.
+2.2 Solución tecnológica
+El prototipo implementa dos vistas diferenciadas por rol:
+Vista comandante de Incidentes:
+•	Mapa operativo con zonas de riesgo, advertencia, brigadas, albergues y puesto de mando.
+•	Panel de estado general (conteo de zonas, brigadas, alertas).
+•	Panel de Alertas S.O.S. con historial y acción "marcar atendida".
+•	Detalle de selección al hacer clic sobre un marcador.
+Vista Brigadista (móvil):
+•	Frame de teléfono con barra de estado de conexión siempre visible.
+•	Lista de misiones con prioridad, estado y sincronización.
+•	Check-In / Check-Out con hora, ubicación GPS y formulario de reporte.
+•	Barra fija inferior con botón S.O.S. y modal de confirmación.
+•	Toggle "Simular sin conexión" para demostrar el flujo offline.
+2.3 Sistemas críticos del proceso
+Se identificaron como críticos:
+TABLA 1 — Sistemas críticos
+Sistema crítico	Riesgo si falla	Mitigación en SCCN
+Autenticación y asignación de rol	Suplantación de identidad, acciones no autorizadas	JWT simulado con expiración de 8h, sessionStorage, sanitización de inputs
+Geolocalización	Reportes sin contexto, brigadas no localizables	GPS del dispositivo con fallback a ubicación simulada
+Check-In / Check-Out	Pérdida de trazabilidad operativa	Persistencia local optimista + cola de sincronización
+Botón S.O.S.	Vidas en riesgo, falsas alarmas	Confirmación explícita + reutilización de cola offline-first
+Panel del Comandante	Decisiones sin información	Actualización reactiva desde la cola de sync
+3. ARQUITECTURA Y MODELOS CLOUD APLICADOS
+3.1 Modelo SaaS (Software as a Service)
+Aplicado en: Tailwind CSS (CDN), Leaflet (CDN), Google Fonts (CDN).
+Por qué: permiten acelerar el desarrollo sin mantener infraestructura propia de build, sirviendo assets estáticos desde redes globales con caché distribuida.
+Beneficio: cero instalación, actualizaciones automáticas, reducción del tiempo de prototipado y del peso del repositorio.
+3.2 Modelo IaaS (Infrastructure as a Service)
+Aplicado en (arquitectura objetivo): AWS EC2 como host del backend Node.js con WebSocket (WSS), según se declara en la barra de estado del prototipo.
+Por qué: una catástrofe genera picos de tráfico impredecibles (x100 en minutos). IaaS permite auto-scaling horizontal, distribución multi-AZ y pago por uso.
+Beneficio:
+•	Escalabilidad: agregar instancias al detectar pico.
+•	Disponibilidad: si una AZ cae, otra atiende.
+•	Costo: en período de calma se reduce la flota.
+3.3 Modelo DBaaS / PaaS gestionado
+Aplicado en (arquitectura objetivo): PostgreSQL + PostGIS gestionado (ej. AWS RDS), y Redis para pub/sub de WebSocket.
+Por qué: no se justifica que el equipo opere una base geoespacial a mano; conviene delegar backups, réplicas, failover y parches a un servicio gestionado.
+Beneficio: persistencia confiable de datos geoespaciales, recuperación ante desastres, escalado vertical sencillo.
+3.4 Cloud Computing (paradigma general)
+Todo el stack vive en la nube, lo que aporta:
+•	Accesibilidad: cualquier dispositivo con navegador accede (brigadista con celular en terreno, comandante en puesto fijo).
+•	Confiabilidad: 99.5% de disponibilidad objetivo, redundancia geográfica.
+•	Escalabilidad: elasticidad ante picos.
+•	Trazabilidad: logs centralizados para auditoría post-evento.
+3.5 Cuadro comparativo
+TABLA 2 — Comparativa de modelos cloud
+Modelo	Uso en SCCN	Beneficio principal	Escalabilidad	Accesibilidad
+SaaS	Tailwind, Leaflet, Fonts	Velocidad de desarrollo	Gestionada por el proveedor	Global vía CDN
+IaaS	AWS EC2 (backend Node.js)	Control total del runtime	Auto-scaling horizontal	Multi-AZ
+DBaaS	PostgreSQL + PostGIS gestionado	Persistencia confiable	Réplicas gestionadas	Multi-región
+PaaS (Redis)	Pub/Sub WebSocket	Baja latencia	Clúster gestionado	Global
+4. CUMPLIMIENTO NORMATIVO Y BUENAS PRÁCTICAS
+4.1 OWASP Top 10 (A03:2021 — Injection)
+El prototipo implementa sanitizeInput() que filtra:
+•	Etiquetas <script>.
+•	Atributos de evento (onerror=, onload=).
+•	Patrones de inyección SQL (' OR '1'='1, --, ;).
+Cada intento bloqueado:
+1.	Se registra en consola con contador incremental.
+2.	Se muestra un toast de alerta al usuario.
+3.	Se actualiza un log visible en el footer.
+
+Nota crítica: en producción real esta capa debe residir en el backend; en este prototipo se simula en frontend para evidenciar la intención de seguridad desde el primer paso.
+4.2 ISO/IEC 27001 — Sistema de Gestión de Seguridad de la Información
+Controles alineados:
+•	A.5 Políticas de seguridad: documentadas en este informe.
+•	A.9 Control de acceso: JWT con expiración, sessionStorage (no localStorage) para el token.
+•	A.12 Seguridad de operaciones: logs de intentos de ataque.
+•	A.14 Desarrollo seguro: sanitización de entrada, testing documentado.
+•	A.18 Cumplimiento: trazabilidad legal.
+4.3 Normativa chilena aplicable
+TABLA 3 — Normativa chilena
+Ley	Materia	Aplicación en SCCN
+Ley 19.628	Protección de datos personales	Geolocalización solo con consentimiento explícito; minimización de datos
+Ley 19.223	Delitos informáticos	Acceso no autorizado bloqueado por autenticación + sanitización
+Ley 21.459 (2022)	Actualiza delitos informáticos (Convenio Budapest)	Diseño alineado a confidencialidad, integridad y disponibilidad
+Ley 21.663 (2024)	Ley Marco de Ciberseguridad	Arquitectura cloud multi-AZ y auditoría de eventos
+4.4 Consentimiento informado y ética profesional
+El sistema implementa un modal ético-legal que se ejecuta después del login (identidad verificada antes de solicitar permisos) y que:
+•	Explica qué datos se capturan (geolocalización continua durante la operación).
+•	Permite aceptar o rechazar.
+•	Si se rechaza, se limpia la sesión y se vuelve al login.
+Además:
+•	Minimización: solo se guarda lo estrictamente necesario.
+•	Transparencia: el brigadista ve en todo momento si su acción está sincronizada o pendiente.
+•	No repudio: las alertas S.O.S. y check-in/out quedan con hora y ubicación.
+•	Derecho a cancelar: el propio brigadista puede anular una alerta activa.
+4.5 Delitos informáticos considerados en el diseño
+•	Acceso no autorizado: mitigado con autenticación y roles.
+•	Interceptación ilícita: mitigado con WSS (WebSocket seguro).
+•	Daño informático: mitigado con validación de entrada.
+•	Falsificación informática: mitigado con JWT firmado (en producción).
+5. CONFIABILIDAD PARA EL NEGOCIO
+La confiabilidad en SCCN no se mide solo en "uptime", sino en la capacidad de entregar información correcta en el peor momento. Se logra mediante:
+1.	Offline-first: las acciones del brigadista se aplican localmente y se encolan si no hay red, sincronizándose automáticamente al reconectar.
+2.	Redundancia cloud: arquitectura multi-AZ evita punto único de fallo.
+3.	Auditoría: log de intentos XSS/SQLi, historial de alertas S.O.S.
+4.	Trazabilidad legal: cada acción tiene timestamp y usuario.
+5.	Transparencia con el usuario: badges visuales de estado de sync.
+
+Impacto en el negocio: reduce el tiempo de respuesta del mando, evita pérdida de reportes y disminuye el riesgo humano en terreno. Esto se traduce directamente en vidas y en confianza institucional.
+6. TESTING Y CONTROL DE CALIDAD
+6.1 Estrategia
+Se definió una matriz de casos manuales (T01–T17) que cubre los cinco pasos del prototipo:
+•	Autenticación (T01–T03, T06).
+•	Seguridad OWASP (T04–T05).
+•	Consentimiento (T07–T08).
+•	Dashboard Comandante (T09–T10).
+•	Misiones y Check-In/Out (T11–T12).
+•	Offline-First (T13–T14).
+•	Botón S.O.S. (T15–T17).
+6.2 Resultados esperados vs obtenidos
+TABLA 4 — Matriz de testing
+ID	Caso	Esperado	Obtenido	Estado
+T01	Login comandante válido	JWT + rol comandante	Igual	Aprobado
+T02	Login brigadista válido	JWT + rol brigadista	Igual	Aprobado
+T03	Login inválido	Mensaje de error	Igual	Aprobado
+T04	Input <script>	Bloqueo + toast	Igual	Aprobado
+T05	Input ' OR '1'='1	Bloqueo + contador	Igual	Aprobado
+T06	Expiración JWT	Limpia sesión	Igual	Aprobado
+T07	Rechazar consentimiento	Vuelve a login	Igual	Aprobado
+T08	Aceptar consentimiento	Activa sesión	Igual	Aprobado
+T09	Carga mapa	Marcadores visibles	Igual	Aprobado
+T10	Clic en marcador	Detalle actualizado	Igual	Aprobado
+T11	Check-Out sin estado	Bloquea envío	Igual	Aprobado
+T12	Check-In/Out con hora y ubicación	Datos guardados	Igual	Aprobado
+T13	Check-In offline	Badge pendiente	Igual	Aprobado
+T14	Reconexión	Cola vacía, badge sync	Igual	Aprobado
+T15	S.O.S. sin confirmar	Modal, no crea alerta	Igual	Aprobado
+T16	S.O.S. offline	Pendiente + banner	Igual	Aprobado
+T17	Marcar atendida	Se oculta del activo	Igual	Aprobado
+6.3 Defectos encontrados durante el desarrollo
+TABLA 5 — Defectos y correcciones
+#	Defecto	Causa	Corrección aplicada
+1	El toast XSS aparecía dentro del modal de login y se perdía	showXssAlert() estaba acoplada al DOM del modal	Se refactorizó a un toast global en document.body
+2	La barra de conexión no se actualizaba al reconectar	Falta de listener online/offline	Se agregaron window.addEventListener('online'/'offline')
+3	El mapa se renderizaba en tamaño 0 al cambiar de rol	Leaflet necesita invalidateSize() tras montar el contenedor	Se agregó setTimeout(() => mapa.invalidateSize(), 50)
+4	Doble S.O.S. por toques repetidos	No había bloqueo tras confirmar	renderBarraSOS() detecta alerta activa y oculta el botón
+5	El Check-Out permitía enviar sin estado final	Validación ausente	Se agregó if (!estadoFinal) alert(...) y return
+6.4 Correcciones alineadas a ISO 27001
+•	A.12.6 Gestión de vulnerabilidades técnicas: sanitización centralizada.
+•	A.14.2.1 Desarrollo seguro: testing documentado y trazabilidad.
+•	A.16 Gestión de incidentes: log de eventos de seguridad.
+7. CONCLUSIONES
+El prototipo SCCN demuestra que es posible construir una herramienta de coordinación de catástrofes que:
+•	Es accesible desde cualquier dispositivo con navegador.
+•	Es escalable gracias a un diseño cloud multi-modelo (SaaS + IaaS + DBaaS).
+•	Es confiable mediante offline-first, redundancia y auditoría.
+•	Cumple con OWASP A03, ISO 27001 y las leyes chilenas 19.628, 19.223, 21.459 y 21.663.
+El sistema puede evolucionar a producción real incorporando:
+1.	Backend Node.js + WebSocket (reemplazar JWT simulado).
+2.	PostGIS real para coordenadas geográficas verdaderas.
+3.	Service Worker real para offline-first nativo.
+4.	Autenticación multifactor para el rol comandante.
+5.	Integración con sistemas públicos de emergencia (ONEMI/SENAPRED).
